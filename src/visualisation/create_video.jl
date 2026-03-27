@@ -56,7 +56,7 @@ function createVideo(prefix::String; video_dir="video", output_dir="video", post
     # Find all PNG files starting with the prefix
     all_files = readdir(video_dir)
     matching_files = filter(f -> startswith(f, prefix) && endswith(f, ".png"), all_files)    
-   
+    println("hello")
     # Check if any matching files were found
     if isempty(matching_files)
         @debug "No PNG files found with prefix '$prefix' in directory '$video_dir'. Skipping video creation."
@@ -97,9 +97,10 @@ function createVideo(prefix::String; video_dir="video", output_dir="video", post
         end
         
         # Build FFmpeg command using the temporary numbered sequence
-        input_pattern = joinpath(temp_dir, "frame_%04d.png")
+        # Using string concatenation with "/" to avoid Windows '\' causing "\f" (form-feed) evaluation in ffmpeg
+        input_pattern = temp_dir * "/frame_%04d.png"
         # Add scale filter to ensure dimensions are divisible by 2
-        ffmpeg_cmd = `ffmpeg -y -framerate $fps -i $input_pattern -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -movflags +faststart $output_path`
+        ffmpeg_cmd = `ffmpeg -y -framerate $fps -start_number 1 -i $input_pattern -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -movflags +faststart $output_path`
         
         # Run FFmpeg (suppress output)
         ffmpeg_succeeded = false
@@ -284,7 +285,7 @@ function createAllVideos(; video_dir="video", output_dir="video", fps=2, delete_
     end
     
     if isempty(created_videos)
-        println("No videos were created - no matching PNG files found")
+        println("No videos were created (either no matching PNG files were found, or FFmpeg failed).")
     else
         println("\n✓ Successfully created $(length(created_videos)) video(s):")
         for video in created_videos
