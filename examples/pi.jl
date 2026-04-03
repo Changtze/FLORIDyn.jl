@@ -1,59 +1,46 @@
-# Copyright (c) 2025 Uwe Fechner
-# SPDX-License-Identifier: BSD-3-Clause
+# leave space for comments n stuff
 
-# Main script to run a model predictive control (MPC) simulation with FLORIDyn.jl
-# Currently, two modes are supported: control of all turbines with the same induction factor using CONTROL_POINTS parameters
-# and group control with CONTROL_POINTS + (GROUPS-1) parameters (CONTROL_POINTS for induction corrections at different time points 
-# and GROUPS-1 for individual group corrections, with the last group calculated from a constraint).
 
-# The script uses the NOMAD.jl package for black-box optimization of the correction parameters.
-# The number of groups can be 1, 2, 3, 4, 6, 8, or 12.
-# The mean square error between the production and demand is minimized.
-
-# Always run the script with GROUPS = 1 first to get a baseline result without group control. This baseline 
-# is stored in the file data/mpc_result.jld2 and used for comparison when running with group control.
-
-# The constant MAX_STEPS can be one for debugging. With 10 or 100 you already get a rough idea of the optimization 
-# progress. So far, I never needed more than about 1600 steps to converge with GROUPS = 12 and less with fewer groups.
-
-# If you want to create a video, make sure to set ONLINE = true and run Julia with sufficient threads. On a 
-# 7850X with 16 threads, the video creation needs about two hours.
-
-# To create a bar plot, run Julia single threaded.
 
 using Pkg
 if ! ("NOMAD" ∈ keys(Pkg.project().dependencies))
     using TestEnv; TestEnv.activate()
 end
+
+# Imports
 using FLORIDyn, TerminalPager, DistributedNext, DataFrames, NOMAD, JLD2, Statistics, Printf
-using FLORIDyn: TurbineGroup, TurbineArray
+using FLORIDyn, TurbineGroup, TurbineArray
+
+# Serial vs multi-threaded
 if Threads.nthreads() == 1; using ControlPlots; end
 
-settings_file = "data/2021_54T_NordseeOne.yaml"
-vis_file      = "data/vis_54T.yaml"
-data_file               = "data/mpc_result.jld2"
-error_file              = "data/mpc_error.jld2"
+settings_file = "data/baseline.yaml" 
+vis_file = "data/vis_full_9T.yaml"
+data_file = "data/mpc_result_9.jld2"
+error_file = "data/mpc_error_9.jld2"
 data_file_group_control = "data/mpc_result_group_control"
 
-GROUPS = 6 # for USE_HARDCODED_INITIAL_GUESS: 1, 2, 3, 4, 6, 8 or 12, otherwise any integer >= 1
+GROUPS = 3
 CONTROL_POINTS = 5
 MAX_ID_SCALING = 3.0
 FINAL_DEMAND = 0.8
-MAX_STEPS = 1    # maximum number black-box evaluations for NOMAD optimizer; zero means load cached results if available
-USE_HARDCODED_INITIAL_GUESS = true # set to false to start from generic initial guess
+MAX_STEPS = 1
+USE_HARDCODED_INITIAL_GUESS = true
 USE_TGC = false
 USE_STEP = false
 USE_PULSE = false
-USE_FEED_FORWARD = true # if false, use constant induction (no feed-forward)
-ONLINE  = false  # if true, enable online plotting during simulation and create video
-TURBULENCE = true # if true, show the added turbulence in the visualization
+USE_FEED_FORWARD = true
+ONLINE = false
+TURBULENCE = true
 USE_ADVECTION = false
-T_START = 240    # relative time to start increasing demand
-T_END   = 960    # relative time to reach final demand
-T_EXTRA = 2580   # extra time in addition to sim.end_time for MPC simulation
+T_START = 240
+T_END = 960
+T_EXTRA = 2580
+
 MIN_INDUCTION = 0.01
 MAX_DISTANCES = Float64[]
 data_file_group_control = data_file_group_control * '_' * string(GROUPS) * "TGs.jld2"
+
 
 GROUP_CONTROL = (GROUPS != 1)
 if USE_HARDCODED_INITIAL_GUESS
@@ -61,17 +48,23 @@ if USE_HARDCODED_INITIAL_GUESS
 else
     @assert(GROUPS >= 1, "GROUPS must be at least 1")
 end
+
+
 if MAX_STEPS == 0
    SIMULATE = false # if false, load cached results if available
 else
    SIMULATE = true
 end
+
+
 if TURBULENCE
     msr = AddedTurbulence
 else
     msr = VelReduction
 end
-# Load vis settings from YAML file
+
+
+# Load visualisation settings from .yaml file
 vis = Vis(vis_file)
 vis.save = ONLINE
 # For GROUP_CONTROL, disable online visualization during initial setup to avoid NaN issues
@@ -86,24 +79,29 @@ else
     plt = nothing
 end
 
+
 pltctrl = nothing
 # Provide ControlPlots module only for pure sequential plotting (single-threaded, no workers)
 if Threads.nthreads() == 1
     pltctrl = ControlPlots
 end
 
+
 # Automatic parallel/threading setup
 include("remote_plotting.jl")
 include("calc_induction_matrix.jl")
 
+
 # get the settings for the wind field, simulator and controller
 wind, sim, con, floris, floridyn, ta = setup(settings_file)
+
 
 # Override with n groups if GROUPS != 4 (default in settings file is 4)
 if GROUPS != 4
     println("Creating $GROUPS turbine groups based on X coordinates...")
     ta = create_n_groups(ta, GROUPS)
 end
+
 
 sim.end_time += T_EXTRA  # extend simulation time for MPC
 con.yaw="Constant"
@@ -113,8 +111,6 @@ wind.dir_fixed = 270.0
 induction = calc_induction_per_group(vis, 1, 0)
 set_induction!(ta, induction)
 
-time_step = sim.time_step  # seconds
-t_end = sim.end_time - sim.start_time  # relative end time in seconds
 
 # For initial setup, use calc_induction_matrix (only affects pre-optimization visualization)
 # During optimization, calc_induction_matrix2 will be used with proper group handling
@@ -133,6 +129,7 @@ wf, wind, sim, con, floris = prepareSimulation(set, wind, con, floridyn, floris,
 time_vector = 0:time_step:t_end
 demand_data = [calc_demand(vis, t) for t in time_vector]
 con.demand_data = demand_data
+
 
 """
     calc_max_power(wind_speed, ta, wf, floris) -> Float64
@@ -165,6 +162,7 @@ function calc_max_power(wind_speed, ta, wf, floris)
     max_power_per_turbine = 0.5 * floris.airDen * rotor_area * Cp_opt * wind_speed^3 * floris.eta * cos(yaw)^floris.p_p / 1e6  # MW
     max_power = nT * max_power_per_turbine  # total maximum power in MW
 end
+
 
 # This function implements the "model" in the block diagram.
 function run_simulation(set_induction::AbstractMatrix; enable_online=false, msr=msr)
@@ -300,6 +298,7 @@ function calc_induction_matrix2(vis, ta, time_step, t_end; correction)
     return induction_matrix, max_distance
 end
 
+
 function calc_error(vis, rel_power, demand_data, time_step)
     # Start index after skipping initial transient; +1 because Julia is 1-based
     i0 = Int(floor(vis.t_skip / time_step)) + 1
@@ -314,7 +313,7 @@ function calc_error(vis, rel_power, demand_data, time_step)
     return sum((r .- d) .^ 2) / length(d)
 end
 
-include("mpc_plotting.jl")
+# include("pi_plotting.jl")
 
 # Calculate storage time at 100% power in seconds
 function calc_storage_time(time_vector, rel_power_gain)
@@ -422,143 +421,3 @@ else
     p.options.max_bb_eval = MAX_STEPS      # maximum number of function evaluations
     p.options.display_degree = 2           # verbosity level
 end
-
-results = nothing
-if (! SIMULATE) && ((isfile(data_file) && !GROUP_CONTROL) || (isfile(data_file_group_control) && GROUP_CONTROL))
-    println("Loading cached MPC results from $(data_file)…")
-    if GROUP_CONTROL
-        results = JLD2.load(data_file_group_control, "results")
-        results_ref = JLD2.load(data_file, "results")
-        rel_power_ref = results_ref["rel_power"]
-    else
-        results = JLD2.load(data_file, "results")   
-    end
-    # Unpack
-    time_vector   = results["time_vector"]
-    demand_data = results["demand_values"]
-    rel_power     = results["rel_power"]
-    induction_data = results["induction_data"]
-    optimal_correction = results["optimal_correction"]
-    mse = results["mse"]
-else
-    # Run optimization and simulation
-    if GROUP_CONTROL
-        if USE_HARDCODED_INITIAL_GUESS
-            # Create initial guess: CONTROL_POINTS global parameters + (GROUPS-1) group parameters
-            if GROUPS == 8
-                x0 = [1.31, 1.4427, 1.35654, 1.28725, 1.28105, 0.0027, 0.0294, 1.8695, 2.0157, 1.8563, 1.1908, 0.0825]
-            # elseif GROUPS == 7
-                # [1.4205, 1.99512, 1.53716, 1.29955, 1.24977, 0.056094, 2.99831, 0.168302, 1.99127, 2.94931, 1.8258]
-                # [1.52239, 1.79394, 2.0, 1.57331, 1.43218, 1.30729, 1.30697, 0.0023, 2.9996, 2.1372, 0.7263, 1.5837, 2.7548]
-            elseif GROUPS == 4
-                x0 = [1.513, 2.0, 1.54959, 1.35491, 1.27939, 0.0, 0.797814, 2.99485]
-            elseif GROUPS == 6
-                x0 = [1.65486, 1.97541, 1.5316, 1.31961, 1.25507, 0.34362, 2.65742, 0.00128, 2.99976, 1.61484]
-            elseif GROUPS == 2
-                x0 = [1.52628, 1.9693, 1.4923, 1.35422, 1.26623, 0.5599]
-            elseif GROUPS == 3
-                x0 = [1.35, 1.985, 1.7041, 1.396, 1.275, 0.1022, 1.3581]
-            elseif GROUPS == 12
-                # CONTROL_POINTS global + 11 group parameters (last group calculated from constraint)
-                x0 = [1.409, 1.60396, 1.43527, 1.30722, 1.26675, 0.0877, 0.1621, 0.1235, 1.99722, 0.016, 1.9725, 1.34014, 1.8945, 0.85491, 2.8402, 2.0101]
-            else
-                # Generic initial guess for other group counts
-                x0 = vcat(fill(1.5, CONTROL_POINTS), fill(1.0, GROUPS - 1))
-            end
-        else
-            # Default initial guess: all 1.5 for global + all 1.0 for group parameters
-            x0 = vcat(fill(1.5, CONTROL_POINTS), fill(1.0, GROUPS - 1))
-        end
-        result = solve(p, x0)
-        results_ref = JLD2.load(data_file, "results")
-        rel_power_ref = results_ref["rel_power"]
-        optimal_correction = result.x_best_feas
-    else
-        result = solve(p, [1.18291, 1.19575, 1.21248, 1.2409, 1.30345])  # Start from initial guess
-        optimal_correction = result.x_best_feas[1:CONTROL_POINTS]
-    end
-
-    induction_data, max_distance = calc_induction_matrix2(vis, ta, time_step, t_end; correction=optimal_correction)
-    
-    # Enable online visualization for the final simulation with optimized parameters
-    enable_viz = ONLINE && GROUP_CONTROL
-    
-    rel_power = run_simulation(induction_data; enable_online=enable_viz)
-    mse = calc_error(vis, rel_power, demand_data, time_step)
-
-    # Persist
-    if GROUP_CONTROL
-        data_file1 = data_file_group_control
-    else
-        data_file1 = data_file
-    end
-    JLD2.jldsave(data_file1; results=Dict(
-        "time_vector" => collect(time_vector),
-        "demand_values" => demand_data,
-        "rel_power" => rel_power,
-        "induction_data" => induction_data,
-        "optimal_correction" => optimal_correction,
-        "mse" => mse,
-    ))
-end
-
-println("\nRoot Mean Square Error (RMSE): $(round(sqrt(mse) * 100, digits=2))%")
-
-plot_power_and_demand(time_vector, rel_power, demand_data, rel_power_ref; vis, pltctrl)
-
-plot_axial_induction()
-
-if !isnothing(plt)
-    plot_correction2(optimal_correction)
-end 
-
-function print_gains(optimal_correction)
-    if !GROUP_CONTROL || GROUPS == 1
-        println("\n=== Power Gain per Turbine Group ===")
-        println("Group gains not applicable (GROUP_CONTROL is false or only one group).")
-        return
-    end
-    correction = optimal_correction[(CONTROL_POINTS+1):end]
-    id_correction = GROUPS * MAX_ID_SCALING / 2.0 - sum(correction)
-    push!(correction, id_correction)
-    println("\n=== Power Gain per Turbine Group ===")
-    for (i, gain) in enumerate(correction)
-        println("Group $i: $(round(gain, digits=2))")
-    end
-    println("mean: $(round(mean(correction), digits=2))")
-end
-
-if GROUP_CONTROL
-    # calculate rel_power-rel_power_ref
-    start_index = Int(floor((vis.t_skip-40+T_START+(T_END-T_START)) / time_step)) + 1
-    common_length = min(length(rel_power), length(rel_power_ref))
-    rel_power = rel_power[1:common_length]
-    rel_power_ref = rel_power_ref[1:common_length]
-    rel_power_gain = rel_power[start_index:end] .- rel_power_ref[start_index:end]
-    storage_time = calc_storage_time(time_vector, rel_power_gain)
-    println("Estimated storage time at 100% power: $(round(storage_time, digits=2)) s")
-    println()
-    plot_rmt((1:length(rel_power_gain)).*4, rel_power_gain .* 100; xlabel="Time [s]", ylabel="Rel. Power Gain [%]", fig="rel_power_ref", pltctrl)
-    results = JLD2.load(data_file_group_control, "results")
-    print_gains(optimal_correction)
-else
-    results = JLD2.load(data_file, "results")
-end
-
-if ONLINE
-    println("Creating video from png files...")
-    postfix = string(GROUPS)*"T"
-    if TURBULENCE
-        video_path = createVideo("ff_added_turbulence"; fps=6, postfix=postfix)
-    else
-        video_path = createVideo("ff_velocity_reduction"; fps=6, postfix=postfix)
-    end
-    if !isempty(video_path)
-        println("✓ Created video: $video_path")
-    else
-        println("No velocity reduction frames found or video creation failed")
-    end
-end
-
-results
-
