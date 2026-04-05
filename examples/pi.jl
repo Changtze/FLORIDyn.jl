@@ -3,12 +3,9 @@
 
 
 using Pkg
-if ! ("NOMAD" ∈ keys(Pkg.project().dependencies))
-    using TestEnv; TestEnv.activate()
-end
 
 # Imports
-using FLORIDyn, TerminalPager, DistributedNext, DataFrames, NOMAD, JLD2, Statistics, Printf
+using FLORIDyn, TerminalPager, DistributedNext, DataFrames, JLD2, Statistics, Printf
 using FLORIDyn, TurbineGroup, TurbineArray
 
 # Serial vs multi-threaded
@@ -40,6 +37,122 @@ T_EXTRA = 2580
 MIN_INDUCTION = 0.01
 MAX_DISTANCES = Float64[]
 data_file_group_control = data_file_group_control * '_' * string(GROUPS) * "TGs.jld2"
+
+
+# INITIALISE SYSTEM PARAMETERS
+integral_error = 0.0
+previous_time = time()
+sampling_period = 2.0
+
+# GAIN SCHEDULE
+function get_scheduled_gains(scheduling_var)
+# figure out how to implement this but just use constant gains for now
+end
+
+function get_scheduling_variable()
+# May need this
+end
+
+
+# SIMULATION BLOCK: acts as the plant block (where we get out model output)
+function get_plant_output(set_induction::AbstractMatrix; enable_online=false, msr=msr)
+    global set, wind, con, floridyn, floris, sim, ta, Vis
+    con.induction_data = set_induction!
+    wf, wind, sim, con, floris = prepareSimulation(set, wind, con, floridyn, floris, ta, sim)
+
+    # Only enable online vis if explicity requested (to avoid NaN issues during optimisation)
+    vis.online = enable_online
+    wf, md, mi = run_floridyn(plt, set, wf, wnd, sim, con, vis, floridyn, floris; msr=msr)
+
+    # Calculate total wind farm power by grouping time and summing turbine powers
+    total_power_df = combine(groupby(md, :Time), :PowerGen => sum => :TotalPower)
+
+    # Calculate theoretical maximum power based on turbine ratings and wind conditions
+    # Assumptions: free flow wind speed from wind.vel, optimal axial induction factor, no yaw
+    max_power = calc_max_power(wind.vel, ta, wf, floris)
+    rel_power = (total_power_df.TotalPpower ./ max_power)
+end
+
+
+
+placeholder = true
+while placeholder
+    # System inputs
+    ref = get_power_reference_signal()      #  Power reference signal from TSO
+    y = run_simulation()                    #  Get plant output
+    sv = get_scheduling_variable()          #  Some gain scheduling variable
+
+    # Update gains (scheduling gain logic)
+    Kp, Ki = get_scheduled_gains(sv)
+
+    # Calculate error
+    error = ref - y
+
+    # Compute integral term (trapezoidal or forward euler, something fast)
+    dt = get_current_time() - previous_time
+    integral_error += error * dt
+
+    # Compute PI output
+    u = (Kp * error) * (Ki * integral_error)
+
+    # Anti-windup term (clamp the input incase the actuator saturates)
+    u_clamped = clmap(u, min_limit, max_limit)
+
+    if u != u_clamped
+        integral_error -= error * dt
+    end
+
+    # Actuate and step
+    apply_control_signal(u_clamped)
+    previous_time = get_current_time()
+    wait_for_next_sample(sampling_period)
+
+end
+
+
+# Maximum theoretical steady-state power using FLORIS
+function calc_max_power(wind_speed, ta, wf, floris)
+    a_opt = 1/3  # optimal axial induction factor (Betz limit)
+    Cp_opt = 4 * a_opt * (1 - a_opt)^2  # optimal power coefficient
+    yaw = 0.0  # no yaw angle
+
+    # Calculate maximum power for all turbines using getPower formula
+    # P = 0.5 * ρ * A * Cp * U^3 * η * cos(yaw)^p_p
+    nT = length(ta.pos[:, 1])  # number of turbines
+    rotor_area = π * (wf.D[1] / 2)^2  # assuming all turbines have same diameter
+    max_power_per_turbine = 0.5 * floris.airDen * rotor_area * Cp_opt * wind_speed^3 * floris.eta * cos(yaw)^floris.p_p / 1e6  # MW
+    max_power = nT * max_power_per_turbine  # total maximum power in MW
+end
+
+
+function calc_error(vis, rel_power, demand_data, time_step)
+    # Start index after skipping initial transient; +1 because Julia is 1-based
+    i0 = Int(floor(vis.t_skip / time_step)) + 1
+    # Clamp to valid range
+    i0 = max(1, i0)
+    n = min(length(rel_power), length(demand_data)) - i0 + 1
+    if n <= 0
+        error("calc_error: empty overlap after skip; check vis.t_skip and lengths (rel_power=$(length(rel_power)), demand=$(length(demand_data)), i0=$(i0))")
+    end
+    r = @view rel_power[i0:i0 + n - 1]
+    d = @view demand_data[i0:i0 + n - 1]
+    return sum((r .- d) .^ 2) / length(d)
+end
+
+# include("pi_plotting.jl")
+
+# Calculate storage time at 100% power in seconds
+function calc_storage_time(time_vector, rel_power_gain)
+    dt = time_vector[2]-time_vector[1]
+    mean_gain = mean(rel_power_gain)
+    time = length(rel_power_gain)*dt
+    storage_time = mean_gain * time
+end
+
+
+
+
+
 
 
 GROUP_CONTROL = (GROUPS != 1)
@@ -150,18 +263,7 @@ Calculate the theoretical maximum power output for the wind farm.
 - No yaw misalignment (yaw = 0°)
 - All turbines have the same rotor diameter
 """
-function calc_max_power(wind_speed, ta, wf, floris)
-    a_opt = 1/3  # optimal axial induction factor (Betz limit)
-    Cp_opt = 4 * a_opt * (1 - a_opt)^2  # optimal power coefficient
-    yaw = 0.0  # no yaw angle
 
-    # Calculate maximum power for all turbines using getPower formula
-    # P = 0.5 * ρ * A * Cp * U^3 * η * cos(yaw)^p_p
-    nT = length(ta.pos[:, 1])  # number of turbines
-    rotor_area = π * (wf.D[1] / 2)^2  # assuming all turbines have same diameter
-    max_power_per_turbine = 0.5 * floris.airDen * rotor_area * Cp_opt * wind_speed^3 * floris.eta * cos(yaw)^floris.p_p / 1e6  # MW
-    max_power = nT * max_power_per_turbine  # total maximum power in MW
-end
 
 
 # This function implements the "model" in the block diagram.
@@ -299,125 +401,7 @@ function calc_induction_matrix2(vis, ta, time_step, t_end; correction)
 end
 
 
-function calc_error(vis, rel_power, demand_data, time_step)
-    # Start index after skipping initial transient; +1 because Julia is 1-based
-    i0 = Int(floor(vis.t_skip / time_step)) + 1
-    # Clamp to valid range
-    i0 = max(1, i0)
-    n = min(length(rel_power), length(demand_data)) - i0 + 1
-    if n <= 0
-        error("calc_error: empty overlap after skip; check vis.t_skip and lengths (rel_power=$(length(rel_power)), demand=$(length(demand_data)), i0=$(i0))")
-    end
-    r = @view rel_power[i0:i0 + n - 1]
-    d = @view demand_data[i0:i0 + n - 1]
-    return sum((r .- d) .^ 2) / length(d)
-end
-
-# include("pi_plotting.jl")
-
-# Calculate storage time at 100% power in seconds
-function calc_storage_time(time_vector, rel_power_gain)
-    dt = time_vector[2]-time_vector[1]
-    mean_gain = mean(rel_power_gain)
-    time = length(rel_power_gain)*dt
-    storage_time = mean_gain * time
-end
-
-"""
-    eval_fct(x::Vector{Float64}) -> Tuple{Bool, Bool, Vector{Float64}}
-
-Evaluation function for NOMAD optimization of the correction parameter.
-
-This function calculates the mean squared error between the relative power output 
-and demand values for a given correction parameter. It is designed to be minimized 
-by the NOMAD optimizer.
-
-# Arguments
-- `x::Vector{Float64}`: A vector containing the correction parameters
-
-# Returns
-- `success::Bool`: Always `true` to indicate successful evaluation
-- `count_eval::Bool`: Always `true` to count this evaluation
-- `bb_outputs::Vector{Float64}`: Vector containing [objective, constraint(s)]
-
-# Global Variables Used
-- `ta`: Turbine array
-- `time_step`: Simulation time step
-- `t_end`: End time of simulation
-- `demand_data`: Target demand values
-- `GROUP_CONTROL`: Boolean flag for group control mode
-"""
-function eval_fct(x::Vector{Float64})
-    correction = x  # correction is now a vector with parameters
-    print(".")  # progress indicator
-    
-    # Calculate induction matrix with current correction
-    induction_data, max_distance = calc_induction_matrix2(vis, ta, time_step, t_end; correction=correction)
-    if max_distance > 0.0
-        push!(MAX_DISTANCES, max_distance)
-    end
-
-    # Run simulation and get relative power
-    rel_power = run_simulation(induction_data)
-    
-    # Calculate error
-    error = calc_error(vis, rel_power, demand_data, time_step)
-    success = true
-    if isnothing(error) || isnan(error)
-        error = 1e6
-        success = false
-    end
-    
-    # Add constraint if GROUP_CONTROL is true
-    if GROUP_CONTROL
-        # Constraint: x[CONTROL_POINTS+1] + x[CONTROL_POINTS+2] + ... <= GROUPS * MAX_ID_SCALING / 2.0
-        # For NOMAD, constraints should be <= 0, so we formulate as:
-        # x[CONTROL_POINTS+1] + x[CONTROL_POINTS+2] + ... - GROUPS * MAX_ID_SCALING / 2.0 <= 0
-        constraint_sum = sum(x[(CONTROL_POINTS+1):end]) - (GROUPS * MAX_ID_SCALING / 2.0)
-        bb_outputs = [error, constraint_sum]
-    else
-        bb_outputs = [error]
-    end
-    
-    count_eval = true
-    
-    return (success, count_eval, bb_outputs)
-end
 
 
-if GROUP_CONTROL
-    n_group_params = GROUPS - 1  # One less because last group is calculated from constraint
-    n_total_params = CONTROL_POINTS + n_group_params  # CONTROL_POINTS global correction + (GROUPS-1) group correction
-    
-    # Create lower and upper bounds dynamically
-    lower_bound = vcat(fill(1.0, CONTROL_POINTS), fill(0.0, n_group_params))
-    upper_bound = vcat(fill(2.0, CONTROL_POINTS), fill(MAX_ID_SCALING, n_group_params))
-    
-    # Set up NOMAD optimization problem
-    p = NomadProblem(
-        n_total_params,      # dimension (CONTROL_POINTS global + GROUPS-1 group parameters)
-        2,                   # number of outputs (objective + 1 constraint)
-        ["OBJ", "PB"],       # output types: OBJ = objective to minimize, PB = progressive barrier constraint
-        eval_fct;            # evaluation function
-        lower_bound=lower_bound,
-        upper_bound=upper_bound
-    )
 
-    # Set NOMAD options
-    p.options.max_bb_eval = MAX_STEPS      # maximum number of function evaluations
-    p.options.display_degree = 2    # verbosity level
-else
-        # Set up NOMAD optimization problem
-    p = NomadProblem(
-        CONTROL_POINTS,      # dimension (CONTROL_POINTS parameters: correction at CONTROL_POINTS time points)
-        1,                   # number of outputs (just the objective)
-        ["OBJ"],             # output types: OBJ = objective to minimize
-        eval_fct;            # evaluation function
-        lower_bound=fill(1.0, CONTROL_POINTS),   # minimum correction values
-        upper_bound=vcat([2.5], fill(3.0, CONTROL_POINTS - 1))    # maximum correction values
-    )
 
-    # Set NOMAD options
-    p.options.max_bb_eval = MAX_STEPS      # maximum number of function evaluations
-    p.options.display_degree = 2           # verbosity level
-end
