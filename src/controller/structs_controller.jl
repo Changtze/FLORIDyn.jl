@@ -37,6 +37,14 @@ This mode is specifically designed for integration with SOWFA simulation data.
 """
 struct Yaw_SOWFA <: ControllerModel end
 
+"""
+    Yaw_PI <: ControllerModel
+
+A marker struct used to represent a Proportional-Integral (PI) yaw control strategy.
+In this mode, the yaw angle is dynamically adjusted to track a power demand signal.
+"""
+struct Yaw_PI <: ControllerModel end
+
 abstract type InductionModel end
 
 """

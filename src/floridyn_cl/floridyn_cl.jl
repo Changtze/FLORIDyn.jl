@@ -786,6 +786,8 @@ function runFLORIDyn(plt, set::Settings, wf::WindFarm, wind::Wind, sim, con, vis
     vm_int   = Vector{Matrix{Float64}}(undef, sim_steps)
 
     sim_time = sim.start_time
+    con.start_time = sim.start_time
+    con.dt = sim.time_step
     plot_state = nothing  # Initialize animation state
     
     buffers = FLORIDyn.IterateOPsBuffers(wf)
@@ -847,6 +849,7 @@ function runFLORIDyn(plt, set::Settings, wf::WindFarm, wind::Wind, sim, con, vis
         # ========== Calculate Power ==========
         P = getPower(wf, @view(tmpM[1:nT, :]), floris, con)
         ma[(it-1)*nT+1:it*nT, 6] = P
+        con.last_power = sum(P)
 
         # ========== Live Plotting ============
         if vis.online

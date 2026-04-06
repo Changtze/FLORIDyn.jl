@@ -300,6 +300,14 @@ throughout the simulation to determine turbine control actions.
     induction_fixed::Float64 = 0.33
     induction_data::Union{Nothing, Matrix{Float64}} = [0.33;;]
     demand_data::Union{Nothing, Vector{Float64}} = nothing
+    kp::Float64 = 0.1
+    ki::Float64 = 0.01
+    integral_error::Float64 = 0.0
+    last_power::Float64 = 0.0
+    max_power::Float64 = 1.0 # default to 1.0 to avoid division by zero
+    dt::Float64 = 1.0        # simulation time step
+    start_time::Float64 = 0.0 # simulation start time
+    last_update_time::Float64 = -1.0 # last time the PI state was updated
 end
 
 """

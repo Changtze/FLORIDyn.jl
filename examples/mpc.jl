@@ -73,7 +73,7 @@ else
 end
 # Load vis settings from YAML file
 vis = Vis(vis_file)
-vis.save = ONLINE
+vis.save = ONLINEd
 # For GROUP_CONTROL, disable online visualization during initial setup to avoid NaN issues
 # The visualization will be enabled after the first valid induction_data is calculated
 vis.online = ONLINE && !GROUP_CONTROL

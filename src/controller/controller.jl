@@ -147,6 +147,93 @@ function getYaw(::Yaw_Constant, con::Con, iT, t)
 end
 
 """
+    getYaw(::Yaw_PI, con::Con, iT, t) -> Float64 or Vector{Float64}
+
+Return the yaw angle adjusted by a PI controller to track a power demand signal.
+The controller uses the total power production from the previous step (con.last_power)
+to calculate the error against the current demand signal.
+
+# Arguments
+- `::Yaw_PI`: Controller type dispatch parameter for PI yaw control
+- `con::Con`: Controller configuration struct containing PI gains and state
+- `iT`: Turbine index or indices to query
+- `t`: Current simulation time (absolute)
+
+# Behavior
+- **Error calculation**: error = demand - (last_power / max_power)
+- **PI update**: integral_error += error * dt
+- **Output**: yaw = yaw_fixed + (kp * error + ki * integral_error)
+- **Update Frequency**: The PI state is updated only once per time step.
+"""
+function getYaw(::Yaw_PI, con::Con, iT, t)
+    # Update PI state only once per simulation step
+    if t > con.last_update_time
+        # Determine demand index
+        t_rel = t - con.start_time
+        idx = Int(floor(t_rel / con.dt)) + 1
+        demand = 1.0
+        if !isnothing(con.demand_data)
+            if idx > length(con.demand_data)
+                demand = con.demand_data[end]
+            elseif idx < 1
+                demand = con.demand_data[1]
+            else
+                demand = con.demand_data[idx]
+            end
+        end
+
+        # Calculate relative power from previous step
+        rel_power = con.last_power / con.max_power
+        
+        # Calculate error (demand is relative power fraction)
+        error = demand - rel_power
+        
+        # Update integral error
+        con.integral_error += error * con.dt
+
+        # Anti-windup: clamp before final calculation for state update
+        u = con.kp * error + con.ki * con.integral_error
+        u_clamped = clamp(u, -30.0, 30.0)
+        if u != u_clamped
+            # Undo integral update if it leads to saturation
+            con.integral_error -= error * con.dt
+        end
+
+        con.last_update_time = t
+    end
+
+    # Calculate PI output
+    t_rel = t - con.start_time
+    idx = Int(floor(t_rel / con.dt)) + 1
+    demand = 1.0
+    if !isnothing(con.demand_data)
+        if idx > length(con.demand_data)
+            demand = con.demand_data[end]
+        elseif idx < 1
+            demand = con.demand_data[1]
+        else
+            demand = con.demand_data[idx]
+        end
+    end
+    rel_power = con.last_power / con.max_power
+    error = demand - rel_power
+    
+    u = con.kp * error + con.ki * con.integral_error
+    u_clamped = clamp(u, -30.0, 30.0)
+
+    # Base yaw + PI correction
+    yaw = con.yaw_fixed + u_clamped
+    
+    if isa(iT, Integer)
+        return yaw
+    elseif isa(iT, AbstractVector{<:Integer})
+        return fill(yaw, length(iT))
+    else
+        error("Invalid type for iT. Should be Integer or Vector of Integers.")
+    end
+end
+
+"""
     getInduction(::Induction_Constant, con::Con, iT, t) -> Float64 or Vector{Float64}
 
 Return a single constant induction factor for one or multiple turbines.
