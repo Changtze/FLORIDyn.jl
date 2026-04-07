@@ -13,7 +13,7 @@ TURBULENCE    = true
 wind, sim, con, floris, floridyn, ta = setup(settings_file)
 
 # PI Controller Configuration
-con.yaw = "PI"
+con.yaw = "SOWFA"
 con.kp = 0.5   # Proportional gain
 con.ki = 0.05  # Integral gain
 con.dt = sim.time_step

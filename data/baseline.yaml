@@ -74,8 +74,8 @@ sim:
   # the used FLORIS model; currently, only 'gaussian' is supported
   floris: gaussian
   # start & end time of the simulation and the time resolution. 
-  start_time: 20000       # [s]
-  end_time: 21200         # [s]
+  start_time: 240       # [s]
+  end_time: 960         # [s]
   time_step: 4            # [s]
 
   # The discretization method, 'sunflower' or 'isocell'. The latter provides a regular grid 
