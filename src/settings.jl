@@ -265,6 +265,7 @@ the control strategies and parameters for yaw and induction factor control.
   - `"Constant"`: Fixed yaw angle for all turbines
   - `"Interpolation"`: Time-based interpolation from data matrix
   - `"SOWFA"`: Compatible with SOWFA simulation data format
+  - `"PI"`: Closed-loop proportional-integral controller
 - `yaw_fixed::Float64`: Constant yaw angle in degrees (default: 270.0°)
 - `yaw_data::Union{Nothing, Matrix{Float64}}`: Optional yaw control data matrix where:
   - First column contains time values (seconds)
@@ -300,8 +301,8 @@ throughout the simulation to determine turbine control actions.
     induction_fixed::Float64 = 0.33
     induction_data::Union{Nothing, Matrix{Float64}} = [0.33;;]
     demand_data::Union{Nothing, Vector{Float64}} = nothing
-    kp::Float64 = 0.1
-    ki::Float64 = 0.01
+    kp::Float64
+    ki::Float64
     integral_error::Float64 = 0.0
     last_power::Float64 = 0.0
     max_power::Float64 = 1.0 # default to 1.0 to avoid division by zero
@@ -1050,7 +1051,7 @@ function setup(filename)
 end
 
 """
-    Settings(wind::Wind, sim::Sim, con::Con, parallel=false, threading=false)
+Settings(wind::Wind, sim::Sim, con::Con, parallel=false, threading=false)
 
 Create and return a [`Settings`](@ref) object using the provided `wind` and `sim` parameters.
 

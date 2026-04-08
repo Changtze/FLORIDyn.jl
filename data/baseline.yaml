@@ -74,9 +74,9 @@ sim:
   # the used FLORIS model; currently, only 'gaussian' is supported
   floris: gaussian
   # start & end time of the simulation and the time resolution. 
-  start_time: 240       # [s]
-  end_time: 960         # [s]
-  time_step: 4            # [s]
+  start_time: 20000     # [s]
+  end_time: 20100         # [s]
+  time_step: 1      # [s]
 
   # The discretization method, 'sunflower' or 'isocell'. The latter provides a regular grid 
   # with equal sized cells. This is the favoured method! Downside is that the number of cells
@@ -130,13 +130,17 @@ con:
   # - SOWFA         reads the file 'SOWFA_nacelleYaw.csv' which is directly the renamed file
   #                 from a SOWFA simulation. 
   # - Constant      reads a single orientation and applies it to all turbines at all times.
-  yaw: SOWFA
+  # - PI            Closed-loop feedback control using a proportional-integral (PI) controller.
+  #                 There is no need for a .csv file of yaw angles to be provided
+  yaw: PI
   yaw_fixed: 270.0 # constant yaw angle for 'Constant' method [°]
   # induction control method
   # - 'Constant'    sets the axial induction factor to a constant value of 1/3 for all turbines at all times.
   # - 'TGC'         uses the con.induction_data matrix to set the axial induction factor for each turbine
   induction: Constant
-  induction_fixed: 0.33 # fixed induction factor for 'Constant' method
+  induction_fixed: 0.33 # fixed induction factor for 'Constant' method#
+  kp: 0.7  # proportional gain for PI controller
+  ki: 0.2  # integral gain for PI controller
 
 floris:
   alpha: 2.32

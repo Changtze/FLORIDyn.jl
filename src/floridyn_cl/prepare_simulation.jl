@@ -212,6 +212,7 @@ function prepareSimulation(set::Settings, wind::Wind, con::Con, floridyn::FloriD
     nT = size(turbProp.pos, 1)
     data_path = sim.path_to_data
 
+    # ========== WIND: Direction ==========
     if wind.input_dir == "Interpolation"
         try
             path = joinpath(data_path, "WindDir.csv")
@@ -382,6 +383,9 @@ function prepareSimulation(set::Settings, wind::Wind, con::Con, floridyn::FloriD
     elseif yaw_method == "SOWFA"
         nacelleYaw = importSOWFAFile(joinpath(vel_file_dir, "SOWFA_nacelleYaw.csv"))
         con.yaw_data = condenseSOWFAYaw([nacelleYaw[1:wf.nT:end, 2] reshape(nacelleYaw[:,3],wf.nT, :)'])
+    elseif yaw_method == "PI"
+        # No logic needed since it is controlled in simulation
+        nothing
     else
         error("Unknown yaw method: $yaw_method")
     end

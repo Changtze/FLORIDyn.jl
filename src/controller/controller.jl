@@ -166,12 +166,15 @@ to calculate the error against the current demand signal.
 - **Update Frequency**: The PI state is updated only once per time step.
 """
 function getYaw(::Yaw_PI, con::Con, iT, t)
+
     # Update PI state only once per simulation step
     if t > con.last_update_time
         # Determine demand index
         t_rel = t - con.start_time
         idx = Int(floor(t_rel / con.dt)) + 1
         demand = 1.0
+        
+        # Get demand value 
         if !isnothing(con.demand_data)
             if idx > length(con.demand_data)
                 demand = con.demand_data[end]
@@ -183,10 +186,11 @@ function getYaw(::Yaw_PI, con::Con, iT, t)
         end
 
         # Calculate relative power from previous step
-        rel_power = con.last_power / con.max_power
+        rel_power = con.last_power / con.max_power / 1.0e6  # last power is in watts
         
         # Calculate error (demand is relative power fraction)
         error = demand - rel_power
+        println("Error: $error")
         
         # Update integral error
         con.integral_error += error * con.dt
@@ -198,39 +202,51 @@ function getYaw(::Yaw_PI, con::Con, iT, t)
             # Undo integral update if it leads to saturation
             con.integral_error -= error * con.dt
         end
-
         con.last_update_time = t
+        println("Yaw: $(con.yaw_fixed)")
+        println("Clamped input: $u_clamped")
+        yaw = con.yaw_fixed + u_clamped 
     end
 
     # Calculate PI output
-    t_rel = t - con.start_time
-    idx = Int(floor(t_rel / con.dt)) + 1
-    demand = 1.0
-    if !isnothing(con.demand_data)
-        if idx > length(con.demand_data)
-            demand = con.demand_data[end]
-        elseif idx < 1
-            demand = con.demand_data[1]
-        else
-            demand = con.demand_data[idx]
-        end
-    end
-    rel_power = con.last_power / con.max_power
-    error = demand - rel_power
-    
-    u = con.kp * error + con.ki * con.integral_error
-    u_clamped = clamp(u, -30.0, 30.0)
+    # t_rel = t - con.start_time
+    # idx = Int(floor(t_rel / con.dt)) + 1
+    # demand = 1.0
+    # # Get demand value
+    # if !isnothing(con.demand_data)
+    #     if idx > length(con.demand_data)
+    #         demand = con.demand_data[end]
+    #     elseif idx < 1
+    #         demand = con.demand_data[1]
+    #     else
+    #         demand = con.demand_data[idx]
+    #     end
+    # end
+    # rel_power = con.last_power / con.max_power
+    # error = demand - rel_power
 
-    # Base yaw + PI correction
-    yaw = con.yaw_fixed + u_clamped
+    # con.integral_error += error * con.dt
+    # u = con.kp * error + con.ki * con.integral_error
     
-    if isa(iT, Integer)
-        return yaw
-    elseif isa(iT, AbstractVector{<:Integer})
-        return fill(yaw, length(iT))
-    else
-        error("Invalid type for iT. Should be Integer or Vector of Integers.")
-    end
+
+    # u_clamped = clamp(u, -30.0, 30.0)
+    # if u != u_clamped
+    #     con.integral_error -= error * con.dt
+    # end
+    # con.last_update_time = t
+
+    # # Base yaw + PI correction
+    # yaw = con.yaw_fixed + u_clamped
+    
+    return yaw
+    # if isa(iT, Integer)
+    #     return yaw
+    # elseif isa(iT, AbstractVector{<:Integer})
+    #     return fill(yaw, length(iT))
+    # else
+    #     error("Invalid type for iT. Should be Integer or Vector of Integers.")
+
+    # end
 end
 
 """
