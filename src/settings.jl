@@ -294,6 +294,8 @@ throughout the simulation to determine turbine control actions.
 """
 @with_kw mutable struct Con
     yaw::String
+    kp::Float64 = 0.5  # proportional gain for PI control mode
+    ki::Float64 = 0.2  # integral gain for PI control mode
     yaw_fixed::Float64 = 270.0
     yaw_data::Union{Nothing, Matrix{Float64}} = nothing
     tanh_yaw::Bool = false
@@ -301,8 +303,6 @@ throughout the simulation to determine turbine control actions.
     induction_fixed::Float64 = 0.33
     induction_data::Union{Nothing, Matrix{Float64}} = [0.33;;]
     demand_data::Union{Nothing, Vector{Float64}} = nothing
-    kp::Float64
-    ki::Float64
     integral_error::Float64 = 0.0
     last_power::Float64 = 0.0
     max_power::Float64 = 1.0 # default to 1.0 to avoid division by zero

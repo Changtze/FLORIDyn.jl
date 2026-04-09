@@ -190,22 +190,24 @@ function getYaw(::Yaw_PI, con::Con, iT, t)
         
         # Calculate error (demand is relative power fraction)
         error = demand - rel_power
-        println("Error: $error")
         
         # Update integral error
         con.integral_error += error * con.dt
 
         # Anti-windup: clamp before final calculation for state update
         u = con.kp * error + con.ki * con.integral_error
-        u_clamped = clamp(u, -30.0, 30.0)
+        u_clamped = clamp(u, -180.0, 180.0)
         if u != u_clamped
             # Undo integral update if it leads to saturation
             con.integral_error -= error * con.dt
         end
         con.last_update_time = t
-        println("Yaw: $(con.yaw_fixed)")
-        println("Clamped input: $u_clamped")
-        yaw = con.yaw_fixed + u_clamped 
+
+        # con.yaw_fixed + u_clamped is incorrect...
+        # it should be the current yaw angle + u_clamped
+        println("u_clamped: $u_clamped")
+        return u_clamped
+       
     end
 
     # Calculate PI output
