@@ -1,4 +1,4 @@
-# PI controller example for FLORIDyn.jl
+# Main script
 
 using FLORIDyn, DataFrames, JLD2, Statistics, Printf, DelimitedFiles
 using FLORIDyn: TurbineGroup, TurbineArray
@@ -102,7 +102,7 @@ function FLORIDyn.getInduction(mode::APC_OL, con::Con, iT, t)
     demand = get_current_demand(con, t)
     # OL: commands = demand * alfa_fixed * Pfarm_max
     # We return induction factor. For simplicity, we scale a_opt.
-    return fill(0.33 * demand, length(iT))
+    return fill(clamp(0.33 * demand, 0.01, 0.5), length(iT))
 end
 
 function FLORIDyn.getInduction(mode::APC_CL, con::Con, iT, t)
@@ -132,7 +132,7 @@ function FLORIDyn.getInduction(mode::APC_CL, con::Con, iT, t)
         
         # Update induction for each turbine
         target_farm_power_rel = clamp(demand + mode.delta_P_ref, 0.0, 1.0)
-        con.induction_fixed = clamp(0.33 * target_farm_power_rel, 0.0, 0.5)
+        con.induction_fixed = clamp(0.33 * target_farm_power_rel, 0.01, 0.5)
     end
     
     return fill(con.induction_fixed, length(iT))
@@ -144,7 +144,7 @@ function FLORIDyn.getInduction(mode::APC_CL_LB, con::Con, iT, t)
     
     # Nested LB loop (Simplified: Shift induction between upstream/downstream)
     if length(iT) > 1
-        inductions[1] = clamp(inductions[1] * 0.95, 0.0, 0.5) # Extra derate upstream
+        inductions[1] = clamp(inductions[1] * 0.95, 0.01, 0.5) # Extra derate upstream
     end
     return inductions
 end
@@ -183,7 +183,7 @@ function FLORIDyn.getInduction(mode::APC_CL_MR, con::Con, iT, t)
     inductions = zeros(nT_sim)
     for i in 1:nT_sim
         alfa_i = i <= nT_lut ? mode.cl.alfa_coeff[i] : 0.33 
-        inductions[i] = clamp(0.33 * alfa_i * target_power / max(alfa_i, 1e-3), 0.0, 0.5)
+        inductions[i] = clamp(0.33 * alfa_i * target_power / max(alfa_i, 1e-3), 0.01, 0.5)
     end
     
     return inductions
