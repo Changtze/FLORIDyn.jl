@@ -23,7 +23,7 @@ function urban_pattern(t_sec, duration_sec)
     # Morning peak around 8.5, Evening peak around 19.0
     m_peak = 0.5 * exp(-(t_virtual - 8.5)^2 / (2 * 1.5^2))
     e_peak = 0.8 * exp(-(t_virtual - 19.0)^2 / (2 * 2.5^2))
-    baseload = 0.2
+    baseload = 0.4
     
     return baseload + m_peak + e_peak
 end

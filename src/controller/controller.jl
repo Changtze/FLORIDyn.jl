@@ -205,7 +205,7 @@ function getYaw(::Yaw_PI, con::Con, iT, t)
 
         # con.yaw_fixed + u_clamped is incorrect...
         # it should be the current yaw angle + u_clamped
-        println("u_clamped: $u_clamped")
+        # println("u_clamped: $u_clamped")
         return u_clamped
        
     end
