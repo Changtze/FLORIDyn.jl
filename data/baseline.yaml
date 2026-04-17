@@ -75,7 +75,7 @@ sim:
   floris: gaussian
   # start & end time of the simulation and the time resolution. 
   start_time: 20000     # [s]
-  end_time: 20400        # [s]
+  end_time: 22120        # [s]
   time_step: 4    # [s]
 
   # The discretization method, 'sunflower' or 'isocell'. The latter provides a regular grid 
@@ -139,8 +139,8 @@ con:
   # - 'TGC'         uses the con.induction_data matrix to set the axial induction factor for each turbine
   induction: Constant
   induction_fixed: 0.33 # fixed induction factor for 'Constant' method#
-  ki: 2.5  # integral gain for PI controller
-  kp: 5.5 # proportional gain for PI controller
+  ki: 0.25  # integral gain for PI controller
+  kp: 1.2 # proportional gain for PI controller
 
 floris:
   alpha: 2.32

@@ -1,5 +1,4 @@
 # Main script
-
 using FLORIDyn, DataFrames, JLD2, Statistics, Printf, DelimitedFiles
 using FLORIDyn: TurbineGroup, TurbineArray
 using Statistics
@@ -32,11 +31,12 @@ end
 # Settings
 settings_file = length(ARGS) > 0 ? ARGS[1] : "data/baseline.yaml"
 vis_file      = "data/vis_full_9T.yaml"
-apc_mode_str  = length(ARGS) > 1 ? ARGS[2] : "CL"  # Options: OL, CL, CL+LB, CL+MR
+apc_mode_str  = length(ARGS) > 1 ? ARGS[2] : "OL"  # Options: OL, CL, CL+LB, CL+MR
 
 # Load LUT files
 const ALFA_LUT = readdlm("apc_cpp/INPUTS/alfa.in")
 const YAW_LUT  = readdlm("apc_cpp/INPUTS/yaw.in")
+const P_LUT = readdlm("apc_cpp/INPUTS/Pref.in") 
 
 # Formulations definitions
 mutable struct APC_OL <: FLORIDyn.InductionModel 
@@ -208,8 +208,8 @@ function FLORIDyn.getYaw(mode::APC_CL_MR, con::Con, iT, t)
     end
     return yaws
 end
-T_START = 240    # relative time to start increasing demand
-T_END   = 960    # relative time to reach final demand
+T_START = 0.0   # relative time to start increasing demand
+T_END   = 2212.0    # relative time to reach final demand
 MAX_DEMAND = 0.9  # relative maximum demand
 MIN_DEMAND = 0.4  # relative minimum demand
 USE_TGC = false 
@@ -269,7 +269,7 @@ end
 
 con.max_power = calc_max_power(wind.vel, ta, wf, floris)
 # Initialize with a fraction of max power to avoid initial NaNs or jumps
-con.last_power = con.max_power * 0.8 * 1e6 
+con.last_power = con.max_power * 0.8 * 1e6
 
 # Define Demand
 # For simplicity, let's say the demand starts at 80% and stays there
@@ -277,21 +277,20 @@ t_end = sim.end_time - sim.start_time
 # Parameters for the Urban Profile
 # peak_time (hr), magnitude (0-1), spread (width of peak)
 
-
-
 # Application to your simulation vector
 t_end = sim.end_time - sim.start_time
 time_vector = 0:sim.time_step:t_end
 
 # 3. Generate the data
-raw_demand = [urban_pattern(t, t_end) for t in time_vector]
+# raw_demand = [urban_pattern(t, t_end) for t in time_vector]
 
 # 4. Final Min-Max normalization to ensure output is exactly 0.0 to 1.0
-mi, ma = extrema(raw_demand)
-demand_data = (raw_demand .- mi) ./ (ma - mi)
+# mi, ma = extrema(raw_demand)
+# demand_data = (raw_demand .- mi) ./ (ma - mi)
 # time_vector = 0:sim.time_step:t_end
 # Example: ramp demand from 1.0 to 0.7
 # demand_data = [t < T_START ? MAX_DEMAND : max(MIN_DEMAND, MAX_DEMAND - (t - T_START) * 0.001) for t in time_vector]
+demand_data = P_LUT[:, 2]/1e6
 con.demand_data = demand_data
 
 # Visualization settings
@@ -306,6 +305,9 @@ wf, md, mi = run_floridyn(nothing, set, wf, wind, sim, con, vis, floridyn, flori
 # Calculate total power and relative power for plotting
 total_power = combine(groupby(md, :Time), :PowerGen => sum => :TotalPower)
 rel_power = total_power.TotalPower ./ con.max_power
+# println("Total power: $(total_power.TotalPower)")
+# println("Max power: $(con.max_power)")
+# println("rel_power: $rel_power")
 
 # Plot results (if single threaded)
 if Threads.nthreads() == 1
@@ -317,6 +319,15 @@ if Threads.nthreads() == 1
                title="PI Controller Power Tracking")
     display(plt)
 end
+
+# println("Plut: $P_LUT")
+
+# if Threads.nthreads() == 1
+#     using ControlPlots
+#     L_plot = length(total_power.TotalPower)
+#     plt = plot(total_power.Time[1:L_plot], rel_power[1:L_plot])
+#     display(plt)
+# end
 
 println("Simulation finished.")
 if set.induction_mode isa APC_CL

@@ -1,6 +1,6 @@
 # PI controller example for FLORIDyn.jl
 
-using FLORIDyn, DataFrames, JLD2, Statistics, Printf
+using FLORIDyn, DataFrames, JLD2, Statistics, Printf, DelimitedFiles
 using FLORIDyn: TurbineGroup, TurbineArray
 using Statistics
 
@@ -28,6 +28,7 @@ function urban_pattern(t_sec, duration_sec)
     return baseload + m_peak + e_peak
 end
 
+const P_LUT = readdlm("apc_cpp/INPUTS/Pref.in")
 
 # Settings
 settings_file = "data/baseline.yaml"
@@ -89,7 +90,8 @@ raw_demand = [urban_pattern(t, t_end) for t in time_vector]
 
 # 4. Final Min-Max normalization to ensure output is exactly 0.0 to 1.0
 mi, ma = extrema(raw_demand)
-demand_data = (raw_demand .- mi) ./ (ma - mi)
+# demand_data = (raw_demand .- mi) ./ (ma - mi)
+demand_data = P_LUT[:, 2]/1e6
 # time_vector = 0:sim.time_step:t_end
 # Example: ramp demand from 1.0 to 0.7
 # demand_data = [t < T_START ? MAX_DEMAND : max(MIN_DEMAND, MAX_DEMAND - (t - T_START) * 0.001) for t in time_vector]
@@ -107,16 +109,27 @@ wf, md, mi = run_floridyn(nothing, set, wf, wind, sim, con, vis, floridyn, flori
 # Calculate total power and relative power for plotting
 total_power = combine(groupby(md, :Time), :PowerGen => sum => :TotalPower)
 rel_power = total_power.TotalPower ./ con.max_power
+# println("Max power: $(con.max_power)")
+# println("Total power: $(total_power.TotalPower)")
+# println("rel_power: $rel_power")
+
 
 # Plot results (if single threaded)
-if Threads.nthreads() == 1
-    using ControlPlots
-    plt = plot(total_power.Time, [rel_power, demand_data[1:length(rel_power)]], 
-               labels=["Actual Power", "Demand"], 
-               xlabel="Time [s]", ylabel="Relative Power", 
-               title="PI Controller Power Tracking")
-    display(plt)
-end
+# if Threads.nthreads() == 1
+#     using ControlPlots
+#     plt = plot(total_power.Time, [rel_power, demand_data[1:length(rel_power)]], 
+#                labels=["Actual Power", "Demand"], 
+#                xlabel="Time [s]", ylabel="Relative Power", 
+#                title="PI Controller Power Tracking")
+#     display(plt)
+# end
+
+# if Threads.nthreads() == 1
+#     using ControlPlots
+#     L_plot = length(total_power.TotalPower)
+#     plt = plot(total_power.Time[1:L_plot], rel_power[1:L_plot])
+#     display(plt)
+# end
 
 println("Simulation finished.")
 println("Kp: $(con.kp)")
